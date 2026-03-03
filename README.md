@@ -117,6 +117,11 @@ Available tools: `secrets_list` · `secrets_get` · `secrets_set` · `secrets_de
 
 > ⚠️ KeyVault is designed for **local development use**. For production secrets, use Hashicorp Vault, AWS Secrets Manager, etc.
 
+> **Known limitations:**
+> - Global secrets are accessible across all projects and by all connected AI agents (MCP). Use `--project` scoping to limit exposure.
+> - Secret key names and descriptions are stored unencrypted (values are encrypted). An attacker with file access can see which services you use.
+> - The MCP Server has no authentication — any connected agent can read secrets. Only run it locally.
+
 ---
 
 ## 🇨🇳 快速开始
