@@ -124,7 +124,7 @@ Available tools: `secrets_list` · `secrets_get` · `secrets_set` · `secrets_de
 
 ---
 
-## 🇨🇳 快速开始
+## 快速开始
 
 ### 安装
 
