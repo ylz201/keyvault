@@ -24,7 +24,6 @@ except ImportError:
         "MCP SDK not installed. Install with: pip install keyvault-ai[mcp]"
     )
 
-import json
 import asyncio
 from keyvault.store import SecretStore
 

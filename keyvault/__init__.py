@@ -54,8 +54,8 @@ def set_secret(key: str, value: str, project: str | None = None, description: st
     store.set(key, value, project=project, description=description)
 
 
-def list_secrets(project: str | None = None) -> list[dict]:
-    """List all secret keys (values are masked)."""
+def list_secrets(project: str | None = None) -> list:
+    """List all secrets. Returns a list of Secret objects."""
     store = _get_store()
     return store.list(project=project)
 
