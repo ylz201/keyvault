@@ -5,6 +5,7 @@ All secret values are encrypted with Fernet before being written to disk.
 The database is stored at ~/.keyvault/vault.db.
 """
 
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -38,10 +39,12 @@ class SecretStore:
     def _init_db(self):
         """Ensure the database and table exist."""
         ensure_keyvault_dir()
-        conn = self._connect()
-        conn.execute(_CREATE_TABLE)
-        conn.commit()
-        conn.close()
+        with self._connect() as conn:
+            conn.execute(_CREATE_TABLE)
+            conn.commit()
+        # P0 fix: restrict vault.db to owner-only
+        if self.db_path.exists():
+            os.chmod(self.db_path, 0o600)
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(str(self.db_path))
@@ -53,42 +56,40 @@ class SecretStore:
         now = datetime.now().isoformat()
         encrypted_value = encrypt(value)
 
-        conn = self._connect()
-        cursor = conn.cursor()
+        with self._connect() as conn:
+            cursor = conn.cursor()
 
-        # Check if exists
-        cursor.execute(
-            "SELECT rowid FROM secrets WHERE key = ? AND project IS ?",
-            (key, project)
-        )
-        existing = cursor.fetchone()
-
-        if existing:
+            # Check if exists
             cursor.execute(
-                "UPDATE secrets SET value = ?, description = ?, updated_at = ? WHERE key = ? AND project IS ?",
-                (encrypted_value, description, now, key, project)
+                "SELECT rowid FROM secrets WHERE key = ? AND project IS ?",
+                (key, project)
             )
-        else:
-            cursor.execute(
-                "INSERT INTO secrets (key, value, project, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (key, encrypted_value, project, description, now, now)
-            )
+            existing = cursor.fetchone()
 
-        conn.commit()
-        conn.close()
+            if existing:
+                cursor.execute(
+                    "UPDATE secrets SET value = ?, description = ?, updated_at = ? WHERE key = ? AND project IS ?",
+                    (encrypted_value, description, now, key, project)
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO secrets (key, value, project, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (key, encrypted_value, project, description, now, now)
+                )
+
+            conn.commit()
 
         return Secret(key=key, value=value, project=project, description=description, created_at=now, updated_at=now)
 
     def get(self, key: str, project: str | None = None) -> str | None:
         """Get a secret value by key. Returns None if not found."""
-        conn = self._connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT value FROM secrets WHERE key = ? AND project IS ?",
-            (key, project)
-        )
-        row = cursor.fetchone()
-        conn.close()
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT value FROM secrets WHERE key = ? AND project IS ?",
+                (key, project)
+            )
+            row = cursor.fetchone()
 
         if row is None:
             return None
@@ -96,14 +97,13 @@ class SecretStore:
 
     def get_full(self, key: str, project: str | None = None) -> Secret | None:
         """Get a full Secret object by key."""
-        conn = self._connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT key, value, project, description, created_at, updated_at FROM secrets WHERE key = ? AND project IS ?",
-            (key, project)
-        )
-        row = cursor.fetchone()
-        conn.close()
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT key, value, project, description, created_at, updated_at FROM secrets WHERE key = ? AND project IS ?",
+                (key, project)
+            )
+            row = cursor.fetchone()
 
         if row is None:
             return None
@@ -118,19 +118,18 @@ class SecretStore:
 
     def list(self, project: str | None = None, all_scopes: bool = False) -> list[Secret]:
         """List secrets. If all_scopes=True, list all regardless of project."""
-        conn = self._connect()
-        cursor = conn.cursor()
+        with self._connect() as conn:
+            cursor = conn.cursor()
 
-        if all_scopes:
-            cursor.execute("SELECT key, value, project, description, created_at, updated_at FROM secrets ORDER BY project, key")
-        else:
-            cursor.execute(
-                "SELECT key, value, project, description, created_at, updated_at FROM secrets WHERE project IS ? ORDER BY key",
-                (project,)
-            )
+            if all_scopes:
+                cursor.execute("SELECT key, value, project, description, created_at, updated_at FROM secrets ORDER BY project, key")
+            else:
+                cursor.execute(
+                    "SELECT key, value, project, description, created_at, updated_at FROM secrets WHERE project IS ? ORDER BY key",
+                    (project,)
+                )
 
-        rows = cursor.fetchall()
-        conn.close()
+            rows = cursor.fetchall()
 
         return [
             Secret(
@@ -142,15 +141,14 @@ class SecretStore:
 
     def delete(self, key: str, project: str | None = None) -> bool:
         """Delete a secret. Returns True if a row was deleted."""
-        conn = self._connect()
-        cursor = conn.cursor()
-        cursor.execute(
-            "DELETE FROM secrets WHERE key = ? AND project IS ?",
-            (key, project)
-        )
-        deleted = cursor.rowcount > 0
-        conn.commit()
-        conn.close()
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM secrets WHERE key = ? AND project IS ?",
+                (key, project)
+            )
+            deleted = cursor.rowcount > 0
+            conn.commit()
         return deleted
 
     def get_all_as_env(self, project: str | None = None) -> dict[str, str]:
@@ -185,6 +183,10 @@ class SecretStore:
             if "=" not in line:
                 continue
 
+            # Handle `export KEY=VALUE` format
+            if line.startswith("export "):
+                line = line[7:]
+
             key, _, value = line.partition("=")
             key = key.strip()
             value = value.strip()
@@ -193,6 +195,9 @@ class SecretStore:
             if (value.startswith('"') and value.endswith('"')) or \
                (value.startswith("'") and value.endswith("'")):
                 value = value[1:-1]
+
+            if not key:
+                continue
 
             self.set(key, value, project=project)
             count += 1

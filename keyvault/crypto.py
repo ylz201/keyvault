@@ -31,7 +31,25 @@ def generate_master_key() -> bytes:
     return key
 
 
-def load_master_key() -> bytes:
+# ── Cached Fernet instance ──────────────────────────────
+# We cache the Fernet instance to avoid re-reading the master key
+# from disk on every encrypt/decrypt call. The tradeoff is that
+# the key stays in Python process memory until the process exits.
+# This is acceptable for a local CLI tool.
+
+_fernet_instance: Fernet | None = None
+
+
+def _get_fernet() -> Fernet:
+    """Get or create the cached Fernet instance."""
+    global _fernet_instance
+    if _fernet_instance is None:
+        key = _load_master_key()
+        _fernet_instance = Fernet(key)
+    return _fernet_instance
+
+
+def _load_master_key() -> bytes:
     """Load the master key, generating one if it doesn't exist."""
     if not MASTER_KEY_FILE.exists():
         return generate_master_key()
@@ -40,13 +58,11 @@ def load_master_key() -> bytes:
 
 def encrypt(plaintext: str) -> str:
     """Encrypt a plaintext string. Returns base64-encoded ciphertext."""
-    key = load_master_key()
-    f = Fernet(key)
+    f = _get_fernet()
     return f.encrypt(plaintext.encode("utf-8")).decode("utf-8")
 
 
 def decrypt(ciphertext: str) -> str:
     """Decrypt a base64-encoded ciphertext string."""
-    key = load_master_key()
-    f = Fernet(key)
+    f = _get_fernet()
     return f.decrypt(ciphertext.encode("utf-8")).decode("utf-8")

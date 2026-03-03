@@ -41,11 +41,27 @@ def _get_store() -> SecretStore:
 @app.command()
 def set(
     key: str = typer.Argument(..., help="Secret key name (e.g. OPENAI_API_KEY)"),
-    value: str = typer.Argument(..., help="Secret value"),
+    value: str = typer.Argument(None, help="Secret value (omit to enter interactively)"),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project scope (default: global)"),
     description: Optional[str] = typer.Option(None, "--desc", "-d", help="Description / notes"),
+    stdin: bool = typer.Option(False, "--stdin", "-s", help="Read value from stdin (for piping)"),
 ):
-    """Set (create or update) a secret."""
+    """Set (create or update) a secret.
+    
+    For security, prefer interactive input to avoid leaking the value
+    into shell history. Omit the VALUE argument or use --stdin.
+    """
+    if stdin:
+        import sys
+        value = sys.stdin.read().strip()
+    elif value is None:
+        # Interactive hidden prompt (not saved in shell history)
+        value = typer.prompt("Enter secret value", hide_input=True)
+
+    if not value:
+        console.print("❌ Empty value. Aborting.")
+        raise typer.Exit(code=1)
+
     store = _get_store()
     secret = store.set(key, value, project=project, description=description)
     scope = f"[cyan]project:{project}[/]" if project else "[green]global[/]"
