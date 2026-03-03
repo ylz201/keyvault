@@ -7,7 +7,7 @@ Usage as SDK:
 
 from keyvault.store import SecretStore
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 # Lazy-initialized default store
 _default_store: SecretStore | None = None

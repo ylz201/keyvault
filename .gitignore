@@ -21,3 +21,8 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Secrets / dotenv exports
+.env
+.env.*
+*.env

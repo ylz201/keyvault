@@ -13,7 +13,7 @@ Usage:
 
 import os
 import subprocess
-from typing import Optional
+from typing import List, Optional
 
 import typer
 from rich.console import Console
@@ -21,7 +21,9 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 
+from keyvault.fs import format_mode_bits, write_text_secure
 from keyvault.store import SecretStore
+from keyvault.validation import validate_key_name, validate_project_name
 
 app = typer.Typer(
     name="keyvault",
@@ -51,6 +53,13 @@ def set(
     For security, prefer interactive input to avoid leaking the value
     into shell history. Omit the VALUE argument or use --stdin.
     """
+    try:
+        key = validate_key_name(key)
+        if project is not None:
+            project = validate_project_name(project)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+
     if stdin:
         import sys
         value = sys.stdin.read().strip()
@@ -77,6 +86,13 @@ def get(
     unmask: bool = typer.Option(False, "--unmask", "-u", help="Show full value (default: masked)"),
 ):
     """Get a secret value."""
+    try:
+        key = validate_key_name(key)
+        if project is not None:
+            project = validate_project_name(project)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+
     store = _get_store()
     secret = store.get_full(key, project=project)
 
@@ -105,8 +121,14 @@ def list_secrets(
     all_scopes: bool = typer.Option(False, "--all", "-a", help="Show all scopes"),
 ):
     """List all stored secrets."""
+    try:
+        if project is not None:
+            project = validate_project_name(project)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+
     store = _get_store()
-    secrets = store.list(project=project, all_scopes=all_scopes)
+    secrets = store.list_metadata(project=project, all_scopes=all_scopes)
 
     if not secrets:
         console.print("[dim]No secrets found. Use [bold]keyvault set KEY VALUE[/] to add one.[/]")
@@ -122,7 +144,7 @@ def list_secrets(
     for s in secrets:
         table.add_row(
             s.key,
-            s.masked_value(),
+            "••••••••",
             s.scope_label(),
             s.description or "",
             s.updated_at[:19],
@@ -140,6 +162,13 @@ def delete(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ):
     """Delete a secret."""
+    try:
+        key = validate_key_name(key)
+        if project is not None:
+            project = validate_project_name(project)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+
     if not force:
         confirm = typer.confirm(f"Delete '{key}' ({('project:' + project) if project else 'global'})?")
         if not confirm:
@@ -163,10 +192,19 @@ def import_env(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Import into project scope"),
 ):
     """Import secrets from a .env file."""
+    try:
+        if project is not None:
+            project = validate_project_name(project)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+
     store = _get_store()
     try:
         count = store.import_dotenv(filepath, project=project)
     except FileNotFoundError as e:
+        console.print(f"❌ {e}")
+        raise typer.Exit(code=1)
+    except ValueError as e:
         console.print(f"❌ {e}")
         raise typer.Exit(code=1)
 
@@ -182,6 +220,12 @@ def export(
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Write to file instead of stdout"),
 ):
     """Export secrets as .env format."""
+    try:
+        if project is not None:
+            project = validate_project_name(project)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+
     store = _get_store()
     content = store.export_dotenv(project=project)
 
@@ -191,9 +235,19 @@ def export(
 
     if output:
         from pathlib import Path
-        Path(output).write_text(content + "\n")
-        console.print(f"✅ Exported to [bold]{output}[/]")
+        out_path = Path(output).expanduser()
+        write_text_secure(out_path, content + "\n", mode=0o600)
+        mode_bits = format_mode_bits(out_path) or "unknown"
+        console.print(f"✅ Exported to [bold]{out_path}[/] (mode {mode_bits})")
     else:
+        import sys
+
+        if sys.stdout.isatty():
+            console.print(
+                "[yellow]Warning:[/] Exporting secrets to stdout. "
+                "If you redirect to a file, ensure it is owner-only (e.g. chmod 600).",
+                file=sys.stderr,
+            )
         console.print(content)
 
 
@@ -205,17 +259,37 @@ def export(
 def inject(
     ctx: typer.Context,
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Include project-specific overrides"),
+    include_global: bool = typer.Option(True, "--global/--no-global", help="Include global secrets"),
+    keys: Optional[List[str]] = typer.Option(None, "--key", "-k", help="Only inject specific key(s). Repeatable."),
 ):
     """Execute a command with all secrets injected as environment variables.
     
     Usage: keyvault inject -- python my_script.py
     """
+    try:
+        if project is not None:
+            project = validate_project_name(project)
+        if keys:
+            keys = [validate_key_name(k) for k in keys]
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+
     if not ctx.args:
         console.print("❌ No command specified. Usage: keyvault inject -- python script.py")
         raise typer.Exit(code=1)
 
     store = _get_store()
-    env_secrets = store.get_all_as_env(project=project)
+    env_secrets = store.get_all_as_env(project=project, include_global=include_global)
+    if keys:
+        missing = [k for k in keys if k not in env_secrets]
+        env_secrets = {k: env_secrets[k] for k in keys if k in env_secrets}
+        if missing:
+            import sys
+
+            console.print(
+                f"[yellow]Warning:[/] {len(missing)} requested key(s) not found: {', '.join(missing)}",
+                file=sys.stderr,
+            )
 
     # Merge with current environment
     env = {**os.environ, **env_secrets}
@@ -233,19 +307,66 @@ def inject(
 @app.command()
 def info():
     """Show KeyVault configuration info."""
-    from keyvault.crypto import KEYVAULT_DIR, MASTER_KEY_FILE
-    from keyvault.store import DB_FILE
+    from keyvault.crypto import (
+        get_keyvault_dir,
+        get_master_key_backend,
+        get_master_key_file,
+        master_key_exists,
+        master_key_location,
+    )
     from keyvault import __version__
+
+    vault_dir = get_keyvault_dir()
+    db_file = vault_dir / "vault.db"
+    master_key_file = get_master_key_file()
 
     panel_content = Text()
     panel_content.append(f"Version:     {__version__}\n")
-    panel_content.append(f"Vault Dir:   {KEYVAULT_DIR}\n")
-    panel_content.append(f"Database:    {DB_FILE}\n")
-    panel_content.append(f"Master Key:  {MASTER_KEY_FILE}\n")
-    panel_content.append(f"DB Exists:   {'✅' if DB_FILE.exists() else '❌'}\n")
-    panel_content.append(f"Key Exists:  {'✅' if MASTER_KEY_FILE.exists() else '❌'}")
+    panel_content.append(f"Vault Dir:   {vault_dir} (mode {format_mode_bits(vault_dir) or 'unknown'})\n")
+    panel_content.append(f"Database:    {db_file} (mode {format_mode_bits(db_file) or 'missing'})\n")
+    panel_content.append(f"Key Backend: {get_master_key_backend()}\n")
+    panel_content.append(f"Master Key:  {master_key_location()}\n")
+    if master_key_location() != "keyring":
+        panel_content.append(f"Key File:    {master_key_file} (mode {format_mode_bits(master_key_file) or 'missing'})\n")
+    panel_content.append(f"DB Exists:   {'✅' if db_file.exists() else '❌'}\n")
+    panel_content.append(f"Key Exists:  {'✅' if master_key_exists() else '❌'}")
 
     console.print(Panel(panel_content, title="🔐 KeyVault Info", border_style="cyan"))
+
+
+@app.command()
+def harden(
+    delete_file: bool = typer.Option(
+        False,
+        "--delete-file",
+        help="Delete the on-disk master key file after migrating to keyring (recommended).",
+    ),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompts"),
+):
+    """Harden master key storage by migrating it into the OS keyring."""
+    from keyvault.crypto import get_master_key_file, harden_master_key_to_keyring
+
+    master_key_file = get_master_key_file()
+    if delete_file and master_key_file.exists() and not force:
+        ok = typer.confirm(
+            f"Delete master key file at '{master_key_file}' after migrating to keyring?"
+        )
+        if not ok:
+            raise typer.Abort()
+
+    try:
+        present = harden_master_key_to_keyring(delete_file=delete_file)
+    except Exception as e:
+        console.print(f"❌ {e}")
+        raise typer.Exit(code=1)
+
+    if present:
+        console.print("✅ Master key is now available via OS keyring.")
+        if delete_file and not master_key_file.exists():
+            console.print("[dim]On-disk master key file removed.[/]")
+    else:
+        console.print("❌ Failed to migrate master key to keyring.")
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

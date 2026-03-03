@@ -26,3 +26,17 @@ class Secret:
     def scope_label(self) -> str:
         """Human-readable scope label."""
         return f"project:{self.project}" if self.project else "global"
+
+
+@dataclass
+class SecretMetadata:
+    """Non-sensitive metadata for a stored secret (value not included)."""
+    key: str
+    project: str | None = None  # None = global
+    description: str | None = None
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def scope_label(self) -> str:
+        """Human-readable scope label."""
+        return f"project:{self.project}" if self.project else "global"
