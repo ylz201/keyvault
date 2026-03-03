@@ -1,54 +1,75 @@
 ---
 name: secrets-manager
-description: 指导大模型（AI Agent）和其他脚本如何在本项目中正确获取和管理安全的 API Keys 等敏感凭证。
+description: Guides AI agents on how to securely manage API keys using KeyVault. Includes installation, CLI usage, Python SDK, and MCP Server setup.
 ---
 
-# KeyVault — AI Agent 使用指南
+# KeyVault — Secrets Manager for AI Agents
 
-当你（AI Agent）在任何项目中需要处理 API Keys / 密钥 / Token 等敏感信息时，**必须使用 KeyVault** 进行管理。
+When you (an AI agent) need to handle API keys, tokens, or other sensitive credentials in any project, you **MUST use KeyVault**.
 
-## ⛔ 禁止行为
-
-- ❌ 不要创建 `.env` 文件存放密钥
-- ❌ 不要在代码中硬编码 API Key
-- ❌ 不要将密钥写入 git 仓库
-
-## ✅ 正确方式
-
-### 1. CLI 管理密钥
+## Installation
 
 ```bash
-# 设置密钥
-keyvault set OPENAI_API_KEY sk-xxxxx --desc "OpenAI 主账户"
+# Install from GitHub
+pip install git+https://github.com/ylz201/keyvault.git
 
-# 按项目隔离
-keyvault set OPENAI_API_KEY sk-yyyyy --project my-video
-
-# 查看已有密钥
-keyvault list --all
-
-# 从 .env 批量导入
-keyvault import .env
-
-# 注入所有密钥后执行脚本
-keyvault inject -- python my_script.py
+# Or with MCP Server support
+pip install "keyvault-ai[mcp] @ git+https://github.com/ylz201/keyvault.git"
 ```
 
-### 2. Python 代码中获取密钥
+Verify installation:
+```bash
+keyvault info
+```
+
+## ⛔ Rules
+
+- ❌ NEVER create `.env` files to store secrets
+- ❌ NEVER hardcode API keys in source code
+- ❌ NEVER commit secrets to git
+- ✅ ALWAYS use `keyvault` CLI or SDK to manage keys
+
+## CLI Commands
+
+```bash
+keyvault set KEY VALUE                  # Save a secret (global)
+keyvault set KEY VALUE --project NAME   # Save per-project override
+keyvault get KEY                        # Get (masked)
+keyvault get KEY --unmask               # Get (full value)
+keyvault list --all                     # List all secrets
+keyvault delete KEY                     # Delete a secret
+keyvault import .env                    # Bulk import from .env file
+keyvault export > .env                  # Export as .env format
+keyvault inject -- python script.py     # Run command with all secrets as env vars
+```
+
+## Python SDK
 
 ```python
-# 方式 A：SDK（推荐）
-from keyvault import get_secret
-api_key = get_secret("OPENAI_API_KEY")  # 自动 fallback 到 os.environ
+from keyvault import get_secret, set_secret
 
-# 方式 B：环境变量（通用）
+# Get a secret (auto-fallback to os.environ if vault not found)
+api_key = get_secret("OPENAI_API_KEY")
+
+# Or just use standard env vars (works when launched via `keyvault inject`)
 import os
 api_key = os.environ.get("OPENAI_API_KEY")
 ```
 
-### 3. MCP Server（给 Claude / Gemini 等 Agent）
+## MCP Server Setup
 
-在 `claude_desktop_config.json` 中配置：
+To enable AI agents (Claude, Gemini, etc.) to manage secrets via MCP protocol:
+
+### 1. Start the MCP server manually
+
+```bash
+python -m keyvault.mcp_server
+```
+
+### 2. Configure in Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
 ```json
 {
   "mcpServers": {
@@ -60,25 +81,30 @@ api_key = os.environ.get("OPENAI_API_KEY")
 }
 ```
 
-可用的 MCP Tools:
-- `secrets_list` — 列出所有 Key 名
-- `secrets_get` — 获取指定 Key 值
-- `secrets_set` — 设置新 Key
-- `secrets_delete` — 删除 Key
+### 3. Available MCP Tools
 
-## 📋 当脚本需要新 Key 时
+| Tool | Description |
+|------|-------------|
+| `secrets_list` | List all stored key names (values hidden) |
+| `secrets_get` | Retrieve a specific secret value |
+| `secrets_set` | Store a new secret |
+| `secrets_delete` | Remove a secret |
 
-如果你发现某个脚本需要一个尚未配置的 API Key，请提示用户：
+## When a Script Needs a Missing Key
 
-> "此操作需要 `DEEPSEEK_API_KEY`。请运行以下命令配置：  
-> `keyvault set DEEPSEEK_API_KEY <your-key>`  
-> 配置后重新运行即可。"
+If you discover a script requires an API key that hasn't been configured, prompt the user:
 
-## 🔐 安全架构
+> "This operation requires `DEEPSEEK_API_KEY`. Please run:
+> ```
+> keyvault set DEEPSEEK_API_KEY <your-key>
+> ```
+> Then re-run the task."
 
-| 组件 | 说明 |
-|------|------|
-| 加密算法 | Fernet (AES-128-CBC + HMAC-SHA256) |
+## Security
+
+| Component | Detail |
+|-----------|--------|
+| Encryption | Fernet (AES-128-CBC + HMAC-SHA256) |
 | Master Key | `~/.keyvault/master.key` (chmod 600) |
-| 数据库 | `~/.keyvault/vault.db` (加密存储) |
-| 作用域 | global (默认) / project:xxx (项目级覆盖) |
+| Database | `~/.keyvault/vault.db` (encrypted values) |
+| Scopes | `global` (default) / `project:<name>` (override) |
