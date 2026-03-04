@@ -15,6 +15,8 @@
 
 **KeyVault** 为 AI 智能体、CLI 工具和自动化脚本提供统一的密钥管理，替代散落各处的 `.env` 文件。
 
+Quick start doc: `QUICKSTART.md`
+
 ### Why KeyVault? / 为什么用 KeyVault？
 
 | Problem | Solution |
