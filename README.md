@@ -61,6 +61,20 @@ keyvault set OPENAI_API_KEY
 keyvault inject --no-global --key OPENAI_API_KEY -- python app.py
 ```
 
+### Security Confidence Checklist
+
+```bash
+# confirm permissions / backend
+keyvault info
+
+# move master key to OS keyring and remove local key file
+keyvault harden --delete-file
+
+# use project-scoped + least-privilege injection
+keyvault set OPENAI_API_KEY --project myapp
+keyvault inject --project myapp --no-global --key OPENAI_API_KEY -- python app.py
+```
+
 ### CLI
 
 ```bash
@@ -79,6 +93,10 @@ keyvault list --all
 
 # Import from existing .env
 keyvault import .env
+
+# Intelligently scan .env* and import high-confidence secret-like keys
+keyvault scan-env --project myapp --dry-run
+keyvault scan-env --project myapp --apply
 
 # Export
 keyvault export --output .env
@@ -139,6 +157,7 @@ Available tools: `secrets_list` · `secrets_get` · `secrets_set` · `secrets_de
 | List secrets | `keyvault list [--project PROJECT] [--all]` | Metadata-only list (does not print plaintext secret values). |
 | Delete secret | `keyvault delete KEY [--project PROJECT] [--force]` | `--force` skips confirmation. |
 | Import `.env` | `keyvault import FILEPATH [--project PROJECT]` | Bulk import `KEY=VALUE` lines into vault. |
+| Smart scan `.env*` | `keyvault scan-env [--project PROJECT] [--file FILE ...] [--root DIR] [--recursive] [--all] [--apply/--dry-run] [--force]` | Intelligently detect and import high-confidence secret-like keys from env files. |
 | Export `.env` | `keyvault export [--project PROJECT] [--output FILE]` | `--output` writes owner-only file (`0600`). |
 | Inject env | `keyvault inject [--project PROJECT] [--global/--no-global] [--key KEY ...] -- CMD [ARGS...]` | Prefer `--no-global` + repeated `--key` for least privilege. |
 | Show info | `keyvault info` | Shows paths, permissions, key backend, and existence checks. |
@@ -193,6 +212,16 @@ keyvault export --project myapp --output .env.myapp
 
 # Import existing dotenv into project scope
 keyvault import .env --project myapp
+```
+
+#### 5. Smart scan existing env files (security-first)
+
+```bash
+# Preview only
+keyvault scan-env --project myapp --dry-run
+
+# Import selected candidates
+keyvault scan-env --project myapp --apply
 ```
 
 ### Python SDK Reference
@@ -300,6 +329,20 @@ keyvault set OPENAI_API_KEY
 keyvault inject --no-global --key OPENAI_API_KEY -- python app.py
 ```
 
+### 安全感检查清单
+
+```bash
+# 检查权限/后端状态
+keyvault info
+
+# 将主密钥迁移到系统 Keyring，并删除本地 key 文件
+keyvault harden --delete-file
+
+# 使用项目作用域 + 最小权限注入
+keyvault set OPENAI_API_KEY --project myapp
+keyvault inject --project myapp --no-global --key OPENAI_API_KEY -- python app.py
+```
+
 ### CLI 命令
 
 ```bash
@@ -318,6 +361,10 @@ keyvault list --all
 
 # 从 .env 导入
 keyvault import .env
+
+# 智能扫描 .env* 并自动导入高置信度疑似密钥
+keyvault scan-env --project myapp --dry-run
+keyvault scan-env --project myapp --apply
 
 # 导出为 .env
 keyvault export --output .env
@@ -372,6 +419,7 @@ set_secret("DEEPSEEK_API_KEY", "sk-xxx", description="DeepSeek v3")
 | 列表 | `keyvault list [--project PROJECT] [--all]` | 仅显示元数据，不输出明文值。 |
 | 删除 | `keyvault delete KEY [--project PROJECT] [--force]` | `--force` 跳过确认。 |
 | 导入 | `keyvault import FILEPATH [--project PROJECT]` | 从 `.env` 批量导入。 |
+| 智能扫描导入 | `keyvault scan-env [--project PROJECT] [--file FILE ...] [--root DIR] [--recursive] [--all] [--apply/--dry-run] [--force]` | 智能识别 `.env*` 中高置信度疑似密钥并导入。 |
 | 导出 | `keyvault export [--project PROJECT] [--output FILE]` | `--output` 会按 `0600` 权限写文件。 |
 | 注入执行 | `keyvault inject [--project PROJECT] [--global/--no-global] [--key KEY ...] -- CMD [ARGS...]` | 建议 `--no-global` + `--key` 最小权限注入。 |
 | 查看状态 | `keyvault info` | 查看路径、权限、密钥后端。 |

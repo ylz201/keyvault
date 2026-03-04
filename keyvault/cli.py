@@ -13,6 +13,7 @@ Usage:
 
 import os
 import subprocess
+from pathlib import Path
 from typing import List, Optional
 
 import typer
@@ -22,6 +23,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from keyvault.fs import format_mode_bits, write_text_secure
+from keyvault.envscan import discover_env_files, scan_env_files
 from keyvault.store import SecretStore
 from keyvault.validation import validate_key_name, validate_project_name
 
@@ -36,6 +38,12 @@ console = Console()
 
 def _get_store() -> SecretStore:
     return SecretStore()
+
+
+def _mask_env_value(value: str) -> str:
+    if len(value) <= 8:
+        return "••••••••"
+    return f"{value[:3]}••••••••{value[-2:]}"
 
 
 # ── SET ──────────────────────────────────────────────────
@@ -210,6 +218,109 @@ def import_env(
 
     scope = f"project:{project}" if project else "global"
     console.print(f"✅ Imported [bold]{count}[/] keys into [cyan]{scope}[/] scope.")
+
+
+@app.command(name="scan-env")
+def scan_env(
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Import into project scope"),
+    file: Optional[List[str]] = typer.Option(
+        None,
+        "--file",
+        help="Explicit .env file path(s). Repeatable.",
+    ),
+    recursive: bool = typer.Option(
+        False,
+        "--recursive",
+        "-r",
+        help="Recursively scan for .env* files under --root.",
+    ),
+    root: str = typer.Option(".", "--root", help="Root directory to scan (default: current dir)."),
+    include_all: bool = typer.Option(
+        False,
+        "--all",
+        help="Include non-secret env vars too (default: only high-confidence secret-like keys).",
+    ),
+    apply: bool = typer.Option(
+        True,
+        "--apply/--dry-run",
+        help="Apply imports to vault or preview only.",
+    ),
+    force: bool = typer.Option(False, "--force", "-y", help="Skip confirmation when importing."),
+):
+    """
+    Intelligently scan .env files and import likely secret keys.
+
+    Default behavior is conservative: only high-confidence secret-like keys
+    are selected unless --all is passed.
+    """
+    try:
+        if project is not None:
+            project = validate_project_name(project)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+
+    root_dir = Path(root).expanduser()
+    if not root_dir.exists() or not root_dir.is_dir():
+        raise typer.BadParameter(f"Invalid root directory: {root}")
+
+    files = discover_env_files(root_dir, explicit_files=file, recursive=recursive)
+    if not files:
+        console.print(
+            "[yellow]No .env files found.[/] "
+            "Use --file .env to specify files explicitly, or --recursive to scan subfolders."
+        )
+        raise typer.Exit(code=1)
+
+    candidates = scan_env_files(files, include_all=include_all)
+    if not candidates:
+        mode = "all env vars" if include_all else "high-confidence secret keys"
+        console.print(
+            f"[yellow]No candidates found[/] for {mode}. "
+            "Try --all if you want to import everything."
+        )
+        return
+
+    table = Table(title="🧠 Env Scan Candidates", border_style="dim")
+    table.add_column("Key", style="bold orange1")
+    table.add_column("Masked Value", style="dim")
+    table.add_column("Confidence", style="cyan", no_wrap=True)
+    table.add_column("Source", style="dim")
+    table.add_column("Reason")
+
+    cwd = Path.cwd()
+    for item in candidates:
+        try:
+            source = str(item.source.relative_to(cwd))
+        except ValueError:
+            source = str(item.source)
+        table.add_row(
+            item.key,
+            _mask_env_value(item.value),
+            str(item.confidence),
+            source,
+            item.reason,
+        )
+    console.print(table)
+
+    if not apply:
+        console.print("[dim]Dry run mode; no keys were imported.[/]")
+        return
+
+    if not force:
+        scope = f"project:{project}" if project else "global"
+        ok = typer.confirm(f"Import {len(candidates)} key(s) into {scope} scope?")
+        if not ok:
+            raise typer.Abort()
+
+    store = _get_store()
+    imported = 0
+    for item in candidates:
+        desc = f"Imported by scan-env from {item.source.name}"
+        store.set(item.key, item.value, project=project, description=desc)
+        imported += 1
+
+    scope = f"project:{project}" if project else "global"
+    console.print(f"✅ Imported [bold]{imported}[/] key(s) into [cyan]{scope}[/] scope.")
 
 
 # ── EXPORT ───────────────────────────────────────────────

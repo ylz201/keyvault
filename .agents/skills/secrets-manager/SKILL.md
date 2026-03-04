@@ -67,6 +67,20 @@ keyvault import .env --project myapp
 keyvault export --project myapp --output .env.myapp
 ```
 
+### Smart scan dotenv
+
+```bash
+keyvault scan-env [--project PROJECT] [--file FILE ...] [--root DIR] [--recursive] [--all] [--apply/--dry-run] [--force]
+```
+
+```bash
+# preview only
+keyvault scan-env --project myapp --dry-run
+
+# import high-confidence secret-like keys
+keyvault scan-env --project myapp --apply
+```
+
 ### Inject into subprocess
 
 ```bash
@@ -105,6 +119,13 @@ keyvault inject --project myapp --no-global --key OPENAI_API_KEY -- python run.p
 ```bash
 keyvault set OPENAI_API_KEY sk-new --project myapp
 keyvault get OPENAI_API_KEY --project myapp
+```
+
+### Migrate existing dotenv safely
+
+```bash
+keyvault scan-env --project myapp --dry-run
+keyvault scan-env --project myapp --apply
 ```
 
 ## Python SDK
