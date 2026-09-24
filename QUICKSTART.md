@@ -1,169 +1,67 @@
-# KeyVault Quick Start
+# 0.2 Gateway quick start
 
-Get KeyVault running in under 1 minute.
+## 1. Install and exercise the offline demo
 
-## 1) Install
-
-```bash
-pip install keyvault-ai
-```
-
-> Need MCP server too?
->
-> ```bash
-> pip install keyvault-ai[mcp]
-> ```
-
-## 2) Save your first key
+Use Python 3.10+ on Linux/macOS. Install this source checkout rather than assuming PyPI has this version:
 
 ```bash
-keyvault set OPENAI_API_KEY
+python -m venv .venv
+. .venv/bin/activate
+pip install -e '.[mcp,dev]'
+python -m pytest -q
+keyvault-gateway demo
 ```
 
-This uses hidden input (won’t show your key on screen).
+## 2. Functional local setup (same-user development ONLY)
 
-## 3) Run your app with injected env
+This setup proves functionality, NOT isolation from an agent with the same user's shell access. Use a disposable, least-privilege **test API key**.
 
 ```bash
-keyvault inject --no-global --key OPENAI_API_KEY -- python app.py
+mkdir -m 700 -p "$HOME/.keyvault-gateway" "$HOME/.keyvault-client"
+keyvault set SERVICE_API_KEY_V1 --project gateway-dev
+keyvault-gateway init
+keyvault-gateway create-client local-agent --workspace personal-dev   --token-file "$HOME/.keyvault-client/client.token" --ttl 86400
+keyvault-gateway register examples/quota.operation.json
+keyvault-gateway grant quota-grant --client local-agent   --operation quota-read-v1 --ttl 600 --uses 3
 ```
 
-## 4) Verify setup
+The example profile targets GitHub's API rate-limit endpoint and projects only its integer quota fields. Save an appropriate GitHub test token under `SERVICE_API_KEY_V1`, or replace the administrator-owned profile with an endpoint you control before registration. Do not replace it with an echo endpoint or accept arbitrary destinations from model output.
+
+In a separate trusted terminal, keep the service in the foreground:
 
 ```bash
-keyvault list
-keyvault info
+keyvault-gateway serve --socket "$HOME/.keyvault-gateway/rpc.sock"
 ```
 
-## 5) Security Confidence Check (recommended)
+In the client terminal:
 
 ```bash
-# Move master key into OS keyring and remove local key file
-keyvault harden --delete-file
-
-# Use project scope + least-privilege injection
-keyvault set OPENAI_API_KEY --project myapp
-keyvault inject --project myapp --no-global --key OPENAI_API_KEY -- python app.py
+export KEYVAULT_GATEWAY_SOCKET="$HOME/.keyvault-gateway/rpc.sock"
+export KEYVAULT_GATEWAY_TOKEN_FILE="$HOME/.keyvault-client/client.token"
+keyvault-gateway list
+keyvault-gateway use quota-grant --request-id 11111111-1111-4111-8111-111111111111
+keyvault-gateway status 11111111-1111-4111-8111-111111111111
 ```
 
-Security signals to confirm:
-- `keyvault info` shows vault dir mode `0o700` and DB/file mode `0o600` (when present).
-- MCP policy remains deny-by-default unless you explicitly enable required operations.
-- You avoid `keyvault get --unmask` in shared terminals.
+Reusing the UUID never sends the same request again. Expired or revoked grants cannot be used to replay data; `status` returns only the client's own request metadata. A crash after reservation leaves an unknown result rather than silently retrying.
 
----
+## 3. Revoke and inspect
 
-## Common Next Steps
-
-### Project-scoped secret (recommended)
+Run as the administrator:
 
 ```bash
-keyvault set OPENAI_API_KEY --project myapp
-keyvault inject --project myapp --no-global --key OPENAI_API_KEY -- python app.py
+keyvault-gateway revoke grant quota-grant
+keyvault-gateway audit
 ```
 
-### Import existing `.env`
+This stops **new gateway uses**, not the upstream API key itself. Rotate/revoke the upstream credential separately when necessary.
 
-```bash
-keyvault import .env --project myapp
-```
+## 4. Credential changes
 
-### Smart scan and auto-import likely secrets from `.env*`
+Changing `SERVICE_API_KEY_V1` makes old registrations fail with `CREDENTIAL_CHANGED`. Register a new immutable operation ID and issue new grants. Never update a credential and assume earlier approvals automatically authorize the replacement.
 
-```bash
-# Preview only (recommended first)
-keyvault scan-env --project myapp --dry-run
+## 5. Isolate before connecting an untrusted agent
 
-# Import high-confidence secret-like keys
-keyvault scan-env --project myapp --apply
-```
+Use the deployment model in `SECURITY.md`: separate service identity, root-owned installed code, a private state/vault directory, a group-accessible Unix socket in a non-group-writable directory, and separate client-token files. The admin CLI and gateway state must not be accessible to the agent.
 
-### Export with safe permissions
-
-```bash
-keyvault export --project myapp --output .env.myapp
-```
-
----
-
-## MCP (for AI agents)
-
-`claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "keyvault": {
-      "command": "python",
-      "args": ["-m", "keyvault.mcp_server"]
-    }
-  }
-}
-```
-
-Recommended minimal policy:
-
-```bash
-export KEYVAULT_MCP_ALLOW_LIST=1
-export KEYVAULT_MCP_ALLOW_GET=1
-export KEYVAULT_MCP_ALLOW_GLOBAL=0
-export KEYVAULT_MCP_ALLOWED_KEYS=OPENAI_API_KEY
-python -m keyvault.mcp_server
-```
-
----
-
-## 中文版（超简版）
-
-### 1）安装
-
-```bash
-pip install keyvault-ai
-```
-
-### 2）保存第一个密钥
-
-```bash
-keyvault set OPENAI_API_KEY
-```
-
-### 3）注入运行（最小权限）
-
-```bash
-keyvault inject --no-global --key OPENAI_API_KEY -- python app.py
-```
-
-### 4）检查状态
-
-```bash
-keyvault list
-keyvault info
-```
-
-### 5）安全感检查（建议）
-
-```bash
-# 将主密钥迁移到系统 Keyring，并删除本地 key 文件
-keyvault harden --delete-file
-
-# 使用项目作用域 + 最小权限注入
-keyvault set OPENAI_API_KEY --project myapp
-keyvault inject --project myapp --no-global --key OPENAI_API_KEY -- python app.py
-```
-
-可感知的安全信号：
-- `keyvault info` 里目录权限应为 `0o700`，数据库/密钥文件为 `0o600`（存在时）。
-- MCP 默认拒绝，只有你显式开放的操作才可用。
-- 在共享终端避免使用 `keyvault get --unmask`。
-
-### 6）智能扫描并自动导入 `.env*` 密钥（推荐）
-
-```bash
-# 先预览，不写入
-keyvault scan-env --project myapp --dry-run
-
-# 再执行导入（默认仅导入高置信度疑似密钥）
-keyvault scan-env --project myapp --apply
-```
-
-更多完整用法请看：`README.md`。
+If a service crashes and leaves a socket path behind, startup refuses to overwrite it. An administrator must verify the previous service has stopped before removing that stale socket. Do not blindly delete a socket on every startup.

@@ -4,40 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "keyvault-ai"
-version = "0.1.1"
-description = "Lightweight secrets manager for LLM Agents. Manage API keys across Skills, MCP Servers, and CLI tools."
+version = "0.2.0"
+description = "Agent credential-use gateway with a local encrypted secrets backend"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
-authors = [
-    {name = "ylz201"}
-]
-keywords = ["llm", "secrets", "api-keys", "mcp", "agent", "keyvault"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Security",
-    "Topic :: Software Development :: Libraries",
-]
-dependencies = [
-    "typer>=0.9.0",
-    "rich>=13.0.0",
-    "cryptography>=41.0.0",
-    "keyring>=25.0.0",
-]
+authors = [{name = "ylz201"}]
+keywords = ["secrets", "credential-gateway", "mcp", "agent", "keyvault"]
+classifiers = ["Development Status :: 3 - Alpha", "Intended Audience :: Developers", "License :: OSI Approved :: MIT License", "Programming Language :: Python :: 3", "Topic :: Security"]
+dependencies = ["typer>=0.9.0,<1", "rich>=13.0.0,<15", "cryptography>=41.0.0", "keyring>=25.0.0"]
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.0.0"]
+mcp = ["mcp>=1.0.0,<2"]
 dev = ["pytest>=7.0", "pytest-asyncio"]
 all = ["keyvault-ai[mcp,dev]"]
 
 [project.scripts]
 keyvault = "keyvault.cli:app"
+keyvault-gateway = "keyvault.gateway.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/ylz201/keyvault"
