@@ -1,0 +1,15 @@
+{
+  "id": "quota-read-v1",
+  "workspace": "personal-dev",
+  "credential": {
+    "ref": "github-test-account-v1",
+    "project": "gateway-dev",
+    "key": "SERVICE_API_KEY_V1"
+  },
+  "url": "https://api.github.com/rate_limit",
+  "auth": {"header": "Authorization", "prefix": "Bearer "},
+  "output": {
+    "remaining": {"pointer": "/rate/remaining", "type": "integer"},
+    "limit": {"pointer": "/rate/limit", "type": "integer"}
+  }
+}

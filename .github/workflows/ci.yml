@@ -1,0 +1,44 @@
+name: Credential gateway checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install source and test dependencies
+        run: python -m pip install -e '.[mcp,dev]'
+      - name: Compile
+        run: python -m compileall -q keyvault
+      - name: Full regression suite including real MCP wire test
+        run: |
+          mkdir -p artifacts
+          python -m pytest -q --junitxml=artifacts/junit.xml
+      - name: Offline demo and installed CLI smoke test
+        run: |
+          keyvault-gateway demo
+          keyvault-gateway --help
+          keyvault --help
+      - name: Record exact source and dependency versions
+        if: always()
+        run: |
+          mkdir -p artifacts
+          git rev-parse HEAD > artifacts/commit.txt
+          git archive --format=tar.gz HEAD -o artifacts/source.tar.gz
+          python -m pip freeze > artifacts/dependencies.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-python-${{ matrix.python }}
+          path: artifacts
